@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+.env
+local.settings.json
+azure/function_app/bin/
+azure/function_app/obj/
+*.dll
+*.pdb
+*.deps.json
