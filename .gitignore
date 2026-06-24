@@ -12,3 +12,4 @@ azure/function_app/obj/
 *.dll
 *.pdb
 *.deps.json
+azure/function_app/.python_packages/
