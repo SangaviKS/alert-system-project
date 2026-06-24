@@ -1,15 +1,20 @@
 # This function is deployed and executed in AWS Lambda.
 # It is triggered by SQS queue: order-events
+# SNS topic: order-critical-alerts
 # This file is kept here for reference and version control purposes.
 
 import json
 import logging
 import os
+import boto3
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 ORDER_STATUSES = ["placed", "failed", "cancelled", "processing"]
+SNS_TOPIC_ARN = os.getenv("SNS_TOPIC_ARN")
+
+sns_client = boto3.client("sns", region_name="us-east-1")
 
 def validate_event(event):
     """Validates that an order event has all required fields."""
@@ -41,6 +46,28 @@ def should_retry(event, max_retries=3):
     """Returns True if the event should be retried."""
     return event["retryCount"] < max_retries
 
+def send_sns_alert(event):
+    """Send SNS email alert for critical order events."""
+    subject = f"Critical Order Alert - {event['status'].upper()}"
+    message = (
+        f"Critical Order Event Detected\n\n"
+        f"Order ID:     {event['orderId']}\n"
+        f"Customer:     {event['customerId']}\n"
+        f"Status:       {event['status'].upper()}\n"
+        f"Amount:       ${event['amount']} {event['currency']}\n"
+        f"Time:         {event['timestamp']}\n"
+        f"Retry Count:  {event['retryCount']}\n\n"
+        f"Please review this order immediately."
+    )
+    sns_client.publish(
+        TopicArn=SNS_TOPIC_ARN,
+        Subject=subject,
+        Message=message
+    )
+    logger.info(
+        f"SNS alert sent for order {event['orderId'][:8]}..."
+    )
+
 def lambda_handler(event, context):
     """Process incoming order events from SQS queue."""
     processed = 0
@@ -56,7 +83,9 @@ def lambda_handler(event, context):
             is_valid, validation_message = validate_event(body)
             if not is_valid:
                 logger.error(f"Invalid event: {validation_message}")
-                raise ValueError(f"Validation failed: {validation_message}")
+                raise ValueError(
+                    f"Validation failed: {validation_message}"
+                )
 
             if is_critical_event(body):
                 logger.warning(
@@ -65,6 +94,7 @@ def lambda_handler(event, context):
                     f"Customer: {body['customerId']} | "
                     f"Amount: ${body['amount']}"
                 )
+                send_sns_alert(body)
             else:
                 logger.info(
                     f"Standard event — Order {body['orderId'][:8]}... "
@@ -82,15 +112,22 @@ def lambda_handler(event, context):
             processed += 1
 
         except Exception as e:
-            logger.error(f"Failed to process message {message_id}: {e}")
+            logger.error(
+                f"Failed to process message {message_id}: {e}"
+            )
             batch_item_failures.append(
                 {"itemIdentifier": message_id}
             )
             failed += 1
 
-    logger.info(f"Batch complete — Processed: {processed}, Failed: {failed}")
+    logger.info(
+        f"Batch complete — Processed: {processed}, Failed: {failed}"
+    )
 
     if batch_item_failures:
         return {"batchItemFailures": batch_item_failures}
 
-    return {"statusCode": 200, "body": f"Processed {processed} records"}
+    return {
+        "statusCode": 200,
+        "body": f"Processed {processed} records"
+    }
